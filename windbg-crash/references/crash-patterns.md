@@ -1,5 +1,35 @@
 # Crash Patterns and Diagnostic Paths
 
+## Table of Contents
+
+| # | Pattern | Exception Code |
+|---|---------|---------------|
+| 1 | [Null Pointer Dereference](#1-null-pointer-dereference) | `0xC0000005` (addr near 0) |
+| 2 | [Use-After-Free (UAF)](#2-use-after-free-uaf) | `0xC0000005` (heap fill) |
+| 3 | [Heap Corruption](#3-heap-corruption) | `0xC0000374` |
+| 4 | [Stack Overflow](#4-stack-overflow) | `0xC00000FD` |
+| 5 | [C++ Exception (Unhandled)](#5-c-exception-unhandled) | `0xE06D7363` |
+| 6 | [Stack Buffer Overrun (/GS)](#6-stack-buffer-overrun-gs) | `0xC0000409` |
+| 7 | [Deadlock](#7-deadlock-hang-dump-not-crash) | hang dump |
+| 8 | [Stack Unwinding Failures](#8-stack-unwinding-failures) | bad `k` output |
+| 9 | [Pure Virtual Function Call](#9-pure-virtual-function-call) | `_purecall` / `R6025` |
+| 10 | [CRT Abort / assert](#10-crt-abort--assert) | `abort()` / `_wassert` |
+| 11 | [Out of Memory (OOM)](#11-out-of-memory-oom) | `0xC0000017` / custom |
+| 12 | [CRT Invalid Parameter](#12-crt-invalid-parameter) | `_invalid_parameter` |
+| 13 | [DEP Violation](#13-dep-violation--execute-access-violation) | `0xC0000005` (Param[0]=8) |
+| 14 | [Illegal Instruction](#14-illegal-instruction--bad-function-pointer) | `0xC000001D` |
+| 15 | [Call Into Unloaded Module](#15-call-into-unloaded-module) | IP not in any module |
+| 16 | [Double Free / Invalid Free](#16-double-free--invalid-free) | crash in `RtlFreeHeap` |
+| 17 | [COM / RPC Failure](#17-com--rpc-failure-crash) | COM/proxy crash |
+| 18 | [Handle Leak / GDI Exhaustion](#18-handle-leak--gdi-resource-exhaustion) | resource exhaustion |
+| 19 | [vtable-Based Object Search](#19-vtable-based-object-search-finding-this-pointers) | technique |
+| 20 | [Inline Hook / Code Patching](#20-inline-hook--code-patching) | unexpected jmp at entry |
+| 21 | [Reentrant Crash](#21-reentrant-crash) | repeated frames |
+| 22 | [Optimized Code Caveats](#22-optimized-code-analysis-caveats) | trust note |
+| 23 | [CRT Version Mismatch](#23-crt-version-mismatch) | cross-CRT free |
+
+---
+
 Before using any path below, classify the dump:
 - **Minidump**: start with exception record, stack, registers, modules, and thread state.
 - **Full dump**: memory, heap, address-space, and locals inspection are usually available.
@@ -14,7 +44,7 @@ Before using any path below, classify the dump:
 kp          # find the faulting frame
 r           # check which register holds null
 ub <eip>    # disassemble backward to see what set it null
-u <eip> L3  # disassemble forward — decode the faulting instruction
+u <eip> L3  # disassemble forward --decode the faulting instruction
 dv          # local variables in faulting frame
 ```
 `dv` may be unavailable without private symbols. If so, rely on registers, disassembly, and the calling stack.
@@ -31,7 +61,7 @@ If the faulting instruction is `call [reg+N]` or `call [reg]` where `reg` is 0:
 ```
 # The crash is a virtual function call on a null object pointer
 # reg = vtable pointer, which was read from address 0x0 (the null this pointer)
-# N = vtable slot offset → identifies which virtual function was called
+# N = vtable slot offset ->identifies which virtual function was called
 # Divide N by pointer size (4 for x86, 8 for x64) to get the vtable slot index
 ```
 
@@ -53,7 +83,7 @@ ub <return_address_on_stack>  # disassemble the call site
 !heap -p -a <address>         # page heap trace (if enabled)
 !heap -x <address>            # find heap block containing address
 !address <address>            # memory region info
-dps <address> L10             # dump pointers — look for vtable remnants
+dps <address> L10             # dump pointers --look for vtable remnants
 ```
 `!heap*`, `!address`, and `dps <address>` often need more than a minimal minidump. If they fail, do not rule out UAF; downgrade confidence and ask for full dump or page heap repro.
 
@@ -72,8 +102,8 @@ dps <address> L10             # dump pointers — look for vtable remnants
 ```
 # If dps <address> shows pointer-like values at offset 0 (vtable position):
 ln poi(<address>)             # try to resolve vtable pointer to a symbol
-# If vtable points to valid code → the object was reused by a different class (type confusion)
-# If vtable points to freed/invalid memory → the object was freed but vtable not yet overwritten
+# If vtable points to valid code ->the object was reused by a different class (type confusion)
+# If vtable points to freed/invalid memory ->the object was freed but vtable not yet overwritten
 # Compare with a known valid vtable:
 dps <valid_object_of_same_class> L1   # dump vtable of a live object for comparison
 ```
@@ -86,7 +116,7 @@ dps <valid_object_of_same_class> L1   # dump vtable of a live object for compari
 # Key fields:
 #   UserPtr = start of user-allocated memory
 #   UserSize = allocation size
-#   Flags: if shows "free" or "internal" → block was already freed → confirms UAF
+#   Flags: if shows "free" or "internal" ->block was already freed ->confirms UAF
 # Calculate offset: <addr> - UserPtr = offset within the original allocation
 # This offset can help identify which struct member was being accessed
 ```
@@ -116,7 +146,7 @@ Do not use `!heap -a <handle>` here. `-a` is not the "validate this heap handle"
 **Diagnosis:**
 ```
 !teb                          # stack base/limit
-kp 200                        # long stack trace — look for recursion
+kp 200                        # long stack trace --look for recursion
 !uniqstack                    # deduplicate thread stacks
 dps @rsp L2000                # raw stack dump if k fails
 ```
@@ -148,10 +178,10 @@ Exception parameters layout (from `.exr -1`):
 **x86 (32-bit) type name extraction:**
 ```
 # Given Param[2] = _ThrowInfo address:
-dd <Param[2]>+0xC L1                       # → pCatchableTypeArray pointer
-dd poi(<Param[2]>+0xC)+0x4 L1              # → first CatchableType pointer
-dd poi(poi(<Param[2]>+0xC)+0x4)+0x4 L1     # → TypeDescriptor pointer
-da poi(poi(<Param[2]>+0xC)+0x4)+0x4+0x8    # → type name string (mangled)
+dd <Param[2]>+0xC L1                       # ->pCatchableTypeArray pointer
+dd poi(<Param[2]>+0xC)+0x4 L1              # ->first CatchableType pointer
+dd poi(poi(<Param[2]>+0xC)+0x4)+0x4 L1     # ->TypeDescriptor pointer
+da poi(poi(<Param[2]>+0xC)+0x4)+0x4+0x8    # ->type name string (mangled)
 # Or as one-liner:
 da poi(poi(poi(<Param[2]>+0xC)+0x4)+0x4)+0x8
 ```
@@ -161,24 +191,24 @@ On x64, `_ThrowInfo` and sub-structures use RVAs (relative virtual addresses) fr
 ```
 # Given: Param[2] = _ThrowInfo*, Param[3] = ImageBase
 # Step 1: get CatchableTypeArray RVA from _ThrowInfo
-dd <Param[2]>+0x10 L1                      # → CatchableTypeArray RVA
+dd <Param[2]>+0x10 L1                      # ->CatchableTypeArray RVA
 # Step 2: compute CatchableTypeArray address = ImageBase + RVA
 # Step 3: get first CatchableType RVA
-dd <ImageBase>+<ArrayRVA>+0x4 L1           # → first CatchableType RVA
+dd <ImageBase>+<ArrayRVA>+0x4 L1           # ->first CatchableType RVA
 # Step 4: get TypeDescriptor RVA from CatchableType
-dd <ImageBase>+<TypeRVA>+0x4 L1            # → TypeDescriptor RVA
+dd <ImageBase>+<TypeRVA>+0x4 L1            # ->TypeDescriptor RVA
 # Step 5: read type name (mangled name starts at TypeDescriptor+0x10 on x64)
 da <ImageBase>+<DescRVA>+0x10
 # The result is a mangled C++ name like ".?AVruntime_error@std@@"
-# Decode: remove leading ".?AV" and trailing "@@" → "runtime_error" in namespace "std"
+# Decode: remove leading ".?AV" and trailing "@@" ->"runtime_error" in namespace "std"
 ```
 
 **Common thrown types and their meanings:**
-- `std::bad_alloc` → allocation failure (OOM)
-- `std::runtime_error` / `std::logic_error` → application-level error
-- `std::invalid_argument` → bad function argument
-- `CMemoryException` (MFC) → MFC out of memory
-- `_com_error` → COM HRESULT failure wrapped as exception
+- `std::bad_alloc` ->allocation failure (OOM)
+- `std::runtime_error` / `std::logic_error` ->application-level error
+- `std::invalid_argument` ->bad function argument
+- `CMemoryException` (MFC) ->MFC out of memory
+- `_com_error` ->COM HRESULT failure wrapped as exception
 
 ## 6. Stack Buffer Overrun (/GS)
 
@@ -199,15 +229,15 @@ dv                            # local variables
 !cs -l                        # locked critical sections
 ~*e !clrstack                 # (.NET) all managed stacks
 ~*kvn                         # all native stacks with frame numbers
-!runaway                      # thread CPU time — find who is busy
+!runaway                      # thread CPU time --find who is busy
 ```
 
 **Wait chain reconstruction:**
 1. Identify waiting threads: look for `WaitForSingleObject`, `WaitForMultipleObjects`, `EnterCriticalSection`, `RtlAcquireSRWLockExclusive`, `NtWaitForAlertByThreadId` in thread stacks
 2. For each waiting thread, find what resource it's waiting on:
-   - `!cs <addr>` — shows owning thread ID for critical sections
-   - `!handle <h> f` — shows handle type and details
-3. Trace the chain: Thread A waits for lock X → lock X is held by Thread B → Thread B waits for lock Y → ... → deadlock if chain forms a cycle
+   - `!cs <addr>` --shows owning thread ID for critical sections
+   - `!handle <h> f` --shows handle type and details
+3. Trace the chain: Thread A waits for lock X ->lock X is held by Thread B ->Thread B waits for lock Y ->... ->deadlock if chain forms a cycle
 
 **SRWLock analysis (no built-in `!cs` equivalent):**
 SRWLocks are lightweight and don't have an owner field like critical sections. Diagnosis approach:
@@ -215,12 +245,12 @@ SRWLocks are lightweight and don't have an owner field like critical sections. D
 ~*kvn                         # find all threads in RtlAcquireSRWLock*
 # Look for the SRWLock address in the first argument (rcx on x64, stack on x86)
 # Then find which thread holds it by looking for code paths that acquired the same lock address
-# Cross-reference with threads that are NOT waiting — one of them likely holds the lock
+# Cross-reference with threads that are NOT waiting --one of them likely holds the lock
 ```
 
 **Common deadlock patterns:**
 - **Lock ordering violation**: Thread A holds L1, waits L2; Thread B holds L2, waits L1
-- **UI thread blocked**: main thread waiting for worker → worker sends `SendMessage` → needs UI thread → deadlock
+- **UI thread blocked**: main thread waiting for worker ->worker sends `SendMessage` ->needs UI thread ->deadlock
 - **COM STA marshaling**: cross-apartment COM call to STA that is blocked
 - **Loader lock**: `DllMain` calls function that waits for another thread to finish its `DllMain`
 
@@ -241,7 +271,7 @@ kp                            # retry
 # If still broken:
 !teb                          # get stack base and limit
 dps @rsp <stack_base>         # dump raw stack with symbol resolution
-# Look for return addresses — functions matching known module patterns
+# Look for return addresses --functions matching known module patterns
 # Use ub <address> to verify each candidate is a real return address
 ln <address>                  # find nearest symbol
 .frame /r <n>                 # switch to a specific frame and check registers
@@ -261,7 +291,7 @@ k                             # retry stack walk from new position
 ```
 kp                            # find the caller of __purecall
 # The frame before __purecall called a virtual function on a partially constructed/destroyed object
-dps <this_ptr>                # dump vtable — should show __purecall entries
+dps <this_ptr>                # dump vtable --should show __purecall entries
 ln poi(<this_ptr>)            # identify which class vtable this is
 ```
 
@@ -280,39 +310,39 @@ da/du <message_ptr>           # read the assertion message string if available
 
 **Diagnosis (requires full dump):**
 ```
-!address -summary             # VA space overview — check Free %, largest free block
+!address -summary             # VA space overview --check Free %, largest free block
 ~                             # thread count (each thread stack consumes ~1MB VA)
 !heap -s                      # heap summary
 !heap -stat -h 0              # default heap statistics
-!handle -summary              # handle count by type — check for handle leaks
+!handle -summary              # handle count by type --check for handle leaks
 ```
 If `!address -summary` or `!heap -s` cannot inspect the target, you cannot confirm or exclude VA exhaustion from that dump alone.
 
 **Distinguishing VA exhaustion vs commit limit exhaustion:**
 - **VA exhaustion** (32-bit only): `!address -summary` shows little Free space, but system physical memory may be fine. The process ran out of virtual address space.
-- **Commit limit** exhaustion: affects all processes. The system's total committed memory (RAM + pagefile) is full. Check `!address -summary` → `Committed` bytes vs system commit limit.
-- **Allocation failure size matters**: if Parameter[0] shows a huge allocation (>1GB), the code may have a size calculation bug (integer overflow → requesting absurd size).
+- **Commit limit** exhaustion: affects all processes. The system's total committed memory (RAM + pagefile) is full. Check `!address -summary` ->`Committed` bytes vs system commit limit.
+- **Allocation failure size matters**: if Parameter[0] shows a huge allocation (>1GB), the code may have a size calculation bug (integer overflow ->requesting absurd size).
 
 **Key indicators:**
-- Total Free VA < 200 MB on 32-bit process → address space pressure
-- Largest free region < requested allocation size → fragmentation is the killer
-- High thread count (100+) → each thread stack reserves ~1MB contiguous VA
+- Total Free VA < 200 MB on 32-bit process ->address space pressure
+- Largest free region < requested allocation size ->fragmentation is the killer
+- High thread count (100+) ->each thread stack reserves ~1MB contiguous VA
 
 **Checking for Handle / Thread leaks as OOM contributors:**
 ```
-~                             # thread count — hundreds of threads = leak suspect
+~                             # thread count --hundreds of threads = leak suspect
 !handle -summary              # total handle count and breakdown by type
 # Normal process: < 1000 handles, < 50 threads
 # Suspected leak: > 5000 handles or > 200 threads
-!heap -stat -h <handle>       # per-heap stats — look for one heap with most allocations
+!heap -stat -h <handle>       # per-heap stats --look for one heap with most allocations
 !heap -flt s <size>           # find all blocks of a suspect size (e.g. same-size small blocks = leak)
 ```
 
 **Heap fragmentation analysis:**
 ```
 !address -summary             # compare "Free" total vs "Largest Free" region
-# If Free total >> Largest Free → severe fragmentation
-# Example: Free = 500MB but LargestFree = 2MB → cannot satisfy a 10MB allocation
+# If Free total >> Largest Free ->severe fragmentation
+# Example: Free = 500MB but LargestFree = 2MB ->cannot satisfy a 10MB allocation
 !heap -stat -h 0              # look at block size distribution
 # Many small free blocks between busy blocks = fragmented heap
 ```
@@ -340,7 +370,7 @@ kp                            # find the CRT function that detected the invalid 
 # Common culprits: printf-family with NULL format, fclose on invalid FILE*
 # Look at the frame ABOVE _invalid_parameter for the actual bad call
 .frame <N>                    # switch to the calling frame
-dv                            # inspect local variables — look for NULL pointers
+dv                            # inspect local variables --look for NULL pointers
 ```
 If `dv` is unavailable, use the caller frame, argument registers/stack slots, and CRT helper names as weaker evidence rather than forcing a definitive conclusion.
 
@@ -505,7 +535,7 @@ When you know the class type but need to find live or dangling object instances 
 **Technique:**
 ```
 # Step 1: Find the vtable address for the class
-x Module!ClassName::*vftable*         # → vtable_address
+x Module!ClassName::*vftable*         # ->vtable_address
 
 # Step 2: Search memory for pointers to that vtable
 s -d <search_start> L<search_length> <vtable_address>
@@ -513,14 +543,14 @@ s -d <search_start> L<search_length> <vtable_address>
 ```
 
 **When to use:**
-- UAF investigation — find other instances of the same class to compare with the corrupted one
+- UAF investigation --find other instances of the same class to compare with the corrupted one
 - Identifying which object was involved when `this` is null or corrupted but the class is known from the stack
 - Counting live instances to detect leaks of a specific object type
 
 **Caveats:**
 - Only works with polymorphic classes (classes with virtual functions)
 - Requires symbols for the module that defines the class
-- Inherited classes share base vtable prefix but have their own vtable — search results may include derived classes
+- Inherited classes share base vtable prefix but have their own vtable --search results may include derived classes
 - On minidumps, memory search range is limited to captured pages
 
 ## 20. Inline Hook / Code Patching
@@ -530,7 +560,7 @@ s -d <search_start> L<search_length> <vtable_address>
 **Diagnosis:**
 ```
 .ecxr
-u <faulting_address> L10              # disassemble — look for jmp/call at function entry
+u <faulting_address> L10              # disassemble --look for jmp/call at function entry
 ub <faulting_address>                 # check preceding bytes
 !address <faulting_address>           # verify memory is MEM_IMAGE
 ln <faulting_address>                 # identify the function
@@ -572,8 +602,8 @@ dps @rsp L200                         # (x64) scan raw stack for return addresse
 - Timer/callback firing during a blocking call in the same function
 
 **Common scenarios:**
-- `SendMessage` from within a window procedure handler → re-enters the same WndProc
-- COM call triggers message dispatch → re-enters the calling code
+- `SendMessage` from within a window procedure handler ->re-enters the same WndProc
+- COM call triggers message dispatch ->re-enters the calling code
 - Exception filter/handler calls a function that throws again
 - Reentrancy into non-reentrant code corrupts shared state (member variables, globals)
 
@@ -588,14 +618,14 @@ This is not a crash pattern but an important trust/reliability note for analyzin
 
 **Mitigation:**
 ```
-kf                                    # check frame sizes — zero-size frames may be inlined
+kf                                    # check frame sizes --zero-size frames may be inlined
 .frame /r <N>                         # switch to frame and check register state
 ub <return_address>                   # disassemble call site to see what was actually passed
 ```
 
 **OMAP / PGO / COMDAT folding effects:**
-- Profile-guided optimization (PGO) may reorder code blocks — `ub` may show unrelated code if blocks are non-contiguous
-- COMDAT folding merges identical functions — `ln` may resolve to the wrong function name
+- Profile-guided optimization (PGO) may reorder code blocks --`ub` may show unrelated code if blocks are non-contiguous
+- COMDAT folding merges identical functions --`ln` may resolve to the wrong function name
 - When in doubt, verify with `uf <addr>` to see the full function body rather than trusting `ln` alone
 
 **Rule of thumb:** In optimized builds, trust registers and disassembly over `kp` parameters and `dv` locals.
@@ -610,13 +640,13 @@ lm                                    # look for multiple CRT DLLs (e.g. msvcr12
 lm vm msvcr*                          # version details of all loaded CRT modules
 lm vm vcruntime*
 lm vm ucrtbase*
-kp                                    # the free/delete call — which CRT module is it in?
+kp                                    # the free/delete call --which CRT module is it in?
 # Check the allocating path: was the object created by a different module using a different CRT?
 ```
 
 **How it happens:**
 - Application links against CRT version A, a plugin/DLL links against CRT version B
-- Object allocated with CRT-A's `malloc`, freed with CRT-B's `free` → heap corruption or crash
+- Object allocated with CRT-A's `malloc`, freed with CRT-B's `free` ->heap corruption or crash
 - Installing a new VC++ redistributable at runtime can cause newly loaded DLLs to pick up a different CRT version than existing DLLs
 
 **Key indicators:**

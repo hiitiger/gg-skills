@@ -20,17 +20,17 @@
 | `0xE0434352` | CLR Exception (`.COM`) | .NET unhandled exception |
 | `0x40010006` | CTRL_C_EXIT | Process terminated via Ctrl+C |
 | `0x406D1388` | MSVC Thread Naming | Debugger-only thread naming exception; usually benign |
-| `0xC0000602` | FAIL_FAST | `__fastfail()` called — deliberate abort |
+| `0xC0000602` | FAIL_FAST | `__fastfail()` called --deliberate abort |
 | `0x80000003` | BREAKPOINT | `int 3` / `DebugBreak()` / `__debugbreak()` |
 | `0x80000004` | SINGLE_STEP | Hardware single-step trap |
-| `0xCFFFFFFF` | Application-defined | Custom `RaiseException` — check first param |
+| `0xCFFFFFFF` | Application-defined | Custom `RaiseException` --check first param |
 
 ## Common Custom/Application Exception Codes
 
 | Code | Origin | Meaning |
 |------|--------|---------|
-| `0xE0000008` | Chromium/CEF PartitionAlloc | Out of memory — `TerminateBecauseOutOfMemory` |
-| `0xE0000001`-`0xEFFFFFFF` | Application-defined range | Custom `RaiseException` — check `Parameter[0]` for allocation size or error detail |
+| `0xE0000008` | Chromium/CEF PartitionAlloc | Out of memory --`TerminateBecauseOutOfMemory` |
+| `0xE0000001`-`0xEFFFFFFF` | Application-defined range | Custom `RaiseException` --check `Parameter[0]` for allocation size or error detail |
 
 When encountering unknown exception codes in the `0xE0xxxxxx` range, check the stack for OOM handlers (`OnNoMemoryInternal`, `TerminateBecauseOutOfMemory`) or CRT handlers (`_invalid_parameter`, `_purecall`).
 
@@ -52,11 +52,11 @@ The exception record contains two parameters:
 - Param[1]: target address
 
 **Quick patterns:**
-- Address near `0x00000000` → null pointer dereference
-- Address near a small offset (e.g., `0x0000002C`) → null pointer + struct member offset
-- Address `0xCDCDCDCD` → uninitialized heap memory (debug CRT)
-- Address `0xDDDDDDDD` → freed heap memory (debug CRT)
-- Address `0xFDFDFDFD` → heap guard bytes overrun (debug CRT)
-- Address `0xFEEEFEEE` → freed memory (HeapFree fill)
-- Address `0xABABABAB` → heap guard after allocated block
-- Address `0xBAADF00D` → LocalAlloc(LMEM_FIXED) not yet initialized
+- Address near `0x00000000` ->null pointer dereference
+- Address near a small offset (e.g., `0x0000002C`) ->null pointer + struct member offset
+- Address `0xCDCDCDCD` ->uninitialized heap memory (debug CRT)
+- Address `0xDDDDDDDD` ->freed heap memory (debug CRT)
+- Address `0xFDFDFDFD` ->heap guard bytes overrun (debug CRT)
+- Address `0xFEEEFEEE` ->freed memory (HeapFree fill)
+- Address `0xABABABAB` ->heap guard after allocated block
+- Address `0xBAADF00D` ->LocalAlloc(LMEM_FIXED) not yet initialized
