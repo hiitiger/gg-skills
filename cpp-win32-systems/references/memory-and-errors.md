@@ -6,28 +6,10 @@
 3. SEH & Crashdump
 4. String Encoding (ANSI ↔ Unicode)
 5. Error Handling
-6. Console API
-7. Debugging Helpers
-8. Environment Variables
 
 ## 1. HANDLE RAII Patterns
 
-### Generic HANDLE wrapper
-
-```cpp
-struct HandleDeleter {
-    using pointer = HANDLE;
-    void operator()(HANDLE h) const {
-        if (h && h != INVALID_HANDLE_VALUE) CloseHandle(h);
-    }
-};
-using UniqueHandle = std::unique_ptr<void, HandleDeleter>;
-
-// Usage
-UniqueHandle file(CreateFileW(path, GENERIC_READ, 0, NULL,
-    OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, NULL));
-if (file.get() == INVALID_HANDLE_VALUE) { /* error */ }
-```
+Generic `UniqueHandle` wrapper is defined in SKILL.md § "Essential Patterns". Win32-specific specialized deleters below:
 
 ### Specialized deleters
 
@@ -58,7 +40,7 @@ struct DcDeleter {
 };
 ```
 
-### Scope guard (for anything)
+### Scope guard (for cleanup that lacks a dedicated RAII type)
 
 ```cpp
 class ScopeGuard {
@@ -284,78 +266,3 @@ inline void throw_if_failed(HRESULT hr, const char* ctx = "") {
 }
 ```
 
-## 6. Console API
-
-### Allocate console for GUI app
-
-```cpp
-AllocConsole();
-FILE* fp;
-freopen_s(&fp, "CONOUT$", "w", stdout);
-freopen_s(&fp, "CONOUT$", "w", stderr);
-freopen_s(&fp, "CONIN$", "r", stdin);
-```
-
-### Ctrl+C handler
-
-```cpp
-BOOL WINAPI console_handler(DWORD ctrl) {
-    switch (ctrl) {
-    case CTRL_C_EVENT:
-    case CTRL_BREAK_EVENT:
-    case CTRL_CLOSE_EVENT:
-        g_running = false;
-        return TRUE; // Handled
-    }
-    return FALSE;
-}
-SetConsoleCtrlHandler(console_handler, TRUE);
-```
-
-### Console colors
-
-```cpp
-HANDLE hCon = GetStdHandle(STD_OUTPUT_HANDLE);
-SetConsoleTextAttribute(hCon, FOREGROUND_RED | FOREGROUND_INTENSITY);
-printf("Error!\n");
-SetConsoleTextAttribute(hCon, FOREGROUND_RED | FOREGROUND_GREEN | FOREGROUND_BLUE);
-```
-
-## 7. Debugging Helpers
-
-```cpp
-// Output to debugger (visible in VS Output window / DbgView)
-OutputDebugStringW(L"Debug message\n");
-
-// Check if debugger attached
-if (IsDebuggerPresent()) {
-    DebugBreak(); // Trigger breakpoint
-}
-
-// Performance measurement
-LARGE_INTEGER freq, start, end;
-QueryPerformanceFrequency(&freq);
-QueryPerformanceCounter(&start);
-do_work();
-QueryPerformanceCounter(&end);
-double ms = (end.QuadPart - start.QuadPart) * 1000.0 / freq.QuadPart;
-```
-
-## 8. Environment Variables
-
-```cpp
-// Read
-WCHAR buf[32768];
-DWORD len = GetEnvironmentVariableW(L"PATH", buf, _countof(buf));
-std::wstring path(buf, len);
-
-// Set (current process only)
-SetEnvironmentVariableW(L"MY_VAR", L"value");
-
-// Delete
-SetEnvironmentVariableW(L"MY_VAR", NULL);
-
-// Expand (resolve %VAR% references)
-WCHAR expanded[MAX_PATH];
-ExpandEnvironmentStringsW(L"%USERPROFILE%\\Documents", expanded, MAX_PATH);
-```

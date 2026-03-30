@@ -2,8 +2,8 @@
 
 ## Table of Contents
 1. Creating Threads
-2. Thread Synchronization
-3. Thread Pool
+2. Thread Synchronization (Win32)
+3. Thread Pool (Win32 API)
 4. Thread-Local Storage
 5. Creating Processes
 6. Process Enumeration
@@ -14,7 +14,7 @@
 ### CreateThread with RAII handle
 
 ```cpp
-// UniqueHandle defined in SKILL.md
+// UniqueHandle defined in memory-and-errors.md § "HANDLE RAII Patterns"
 UniqueHandle worker(CreateThread(NULL, 0,
     [](LPVOID param) -> DWORD {
         auto* ctx = (WorkContext*)param;
@@ -48,16 +48,9 @@ WaitForSingleObject(thread.get(), INFINITE);
 
 **Rule**: Use `_beginthreadex` instead of `CreateThread` when the thread uses C runtime functions (printf, malloc, strtok, etc.).
 
-### std::thread (C++11, simplest)
+For `std::thread`, `std::mutex`, `std::condition_variable` — see `cpp-concurrency` skill.
 
-```cpp
-std::thread worker([&] {
-    do_work(data);
-});
-worker.join(); // or worker.detach()
-```
-
-## 2. Thread Synchronization
+## 2. Thread Synchronization (Win32)
 
 ### CRITICAL_SECTION (lightweight, intra-process only)
 
@@ -79,7 +72,7 @@ CriticalSection cs;
 }
 ```
 
-### SRWLock (slim reader/writer, Windows Vista+)
+### SRWLock (slim reader/writer, Vista+)
 
 ```cpp
 SRWLOCK lock = SRWLOCK_INIT; // No cleanup needed
@@ -95,7 +88,7 @@ AcquireSRWLockShared(&lock);
 ReleaseSRWLockShared(&lock);
 ```
 
-### Condition Variable
+### Condition Variable (Win32)
 
 ```cpp
 CONDITION_VARIABLE cv = CONDITION_VARIABLE_INIT;
@@ -106,7 +99,6 @@ bool ready = false;
 AcquireSRWLockExclusive(&lock);
 while (!ready)
     SleepConditionVariableSRW(&cv, &lock, INFINITE, 0);
-// process data
 ReleaseSRWLockExclusive(&lock);
 
 // Signal side
@@ -117,7 +109,7 @@ WakeConditionVariable(&cv);     // One waiter
 WakeAllConditionVariable(&cv);  // All waiters
 ```
 
-### Event (intra-process, simpler than CV for single-signal)
+### Event (simpler than CV for single-signal)
 
 ```cpp
 HANDLE evt = CreateEventW(NULL, FALSE, FALSE, NULL); // Auto-reset, unnamed
@@ -139,7 +131,7 @@ DWORD r = WaitForMultipleObjects(3, handles, FALSE, 5000);
 // Returns WAIT_OBJECT_0 + index, WAIT_TIMEOUT, or WAIT_FAILED
 ```
 
-## 3. Thread Pool
+## 3. Thread Pool (Win32 API)
 
 ### Simple work submission
 
@@ -199,14 +191,7 @@ CloseThreadpoolWait(pw);
 
 ## 4. Thread-Local Storage
 
-### C++11 thread_local (preferred)
-
-```cpp
-thread_local int t_error_code = 0;
-thread_local std::vector<int> t_buffer;
-```
-
-### Win32 TLS (for DLLs or pre-C++11)
+### Win32 TLS (for DLLs or dynamic allocation)
 
 ```cpp
 static DWORD g_tls_index = TLS_OUT_OF_INDEXES;

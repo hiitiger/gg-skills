@@ -293,22 +293,6 @@ if (ready > 0 && FD_ISSET(sock, &read_set)) {
 
 ### UDP
 
-```cpp
-SOCKET sock = socket(AF_INET, SOCK_DGRAM, IPPROTO_UDP);
+Same socket setup as TCP but with `SOCK_DGRAM` / `IPPROTO_UDP`. Use `sendto()` / `recvfrom()` instead of `send()` / `recv()`. Remember `closesocket()` (not POSIX `close()`).
 
-sockaddr_in addr = {};
-addr.sin_family = AF_INET;
-addr.sin_port = htons(9000);
-addr.sin_addr.s_addr = INADDR_ANY;
-bind(sock, (sockaddr*)&addr, sizeof(addr));
-
-// Receive
-sockaddr_in from;
-int fromLen = sizeof(from);
-int n = recvfrom(sock, buf, sizeof(buf), 0, (sockaddr*)&from, &fromLen);
-
-// Send
-sendto(sock, data, len, 0, (sockaddr*)&dest, sizeof(dest));
-
-closesocket(sock);
-```
+> For high-performance async sockets, use IOCP — see [io-and-filesystem.md](io-and-filesystem.md) § "I/O Completion Ports (IOCP)".

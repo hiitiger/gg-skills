@@ -1,6 +1,6 @@
 ---
 name: cpp-win32-systems
-description: Windows C++ systems programming with Win32 API. Use when writing C++ code for Windows desktop applications, GUI windows, message loops, threads, processes, DLL development, COM interfaces, services, shared memory, named pipes, Winsock networking, async I/O (IOCP), registry, file I/O, GDI drawing, or any Win32 API usage. Triggers on HWND, HANDLE, HINSTANCE, CreateWindow, GetMessage, DispatchMessage, CreateThread, CreateProcess, LoadLibrary, CreateFileMapping, CreateNamedPipe, WSAStartup, CreateIoCompletionPort, SetWindowLongPtr, RegisterClassEx, WndProc, LRESULT CALLBACK, WM_ messages, HRESULT, ComPtr, DllMain, VirtualAlloc, BeginPaint, or any Windows-specific C++ code.
+description: Windows C++ systems programming with Win32 API. Use when writing C++ code for Windows desktop applications, GUI windows, message loops, threads, processes, DLL development, COM interfaces, services, shared memory, named pipes, Winsock networking, async I/O (IOCP), registry, file I/O, GDI drawing, crash dump analysis, SEH (structured exception handling), debugging Windows-specific issues, or any Win32 API usage. Triggers on HWND, HANDLE, HINSTANCE, CreateWindow, GetMessage, DispatchMessage, CreateThread, CreateProcess, LoadLibrary, CreateFileMapping, CreateNamedPipe, WSAStartup, CreateIoCompletionPort, SetWindowLongPtr, RegisterClassEx, WndProc, LRESULT CALLBACK, WM_ messages, HRESULT, ComPtr, DllMain, VirtualAlloc, BeginPaint, MiniDumpWriteDump, SetUnhandledExceptionFilter, __try/__except, or any Windows-specific C++ code.
 ---
 
 # Windows C++ Systems Programming
@@ -15,6 +15,7 @@ description: Windows C++ systems programming with Win32 API. Use when writing C+
 | **I/O & File System** | File read/write, memory mapping, async I/O, IOCP | [io-and-filesystem.md](references/io-and-filesystem.md) |
 | **System Services** | DLL, COM, services, registry, Shell, UAC | [system-and-services.md](references/system-and-services.md) |
 | **Memory & Errors** | HANDLE RAII, virtual memory, SEH, encoding, errors | [memory-and-errors.md](references/memory-and-errors.md) |
+| **Utilities** | Console, debug output, perf timing, env vars | [utilities.md](references/utilities.md) |
 
 ## Quick Decision Tree
 
@@ -24,7 +25,8 @@ What are you building?
 │  ├─ Need custom drawing/paint? → GDI section
 │  └─ High-DPI support? → DPI section
 ├─ Background work / parallelism → threads-and-processes.md
-│  ├─ Simple worker thread? → CreateThread
+│  ├─ Win32 thread (CreateThread / _beginthreadex)? → Creating Threads
+│  ├─ std::thread / std::mutex / C++ sync? → cpp-concurrency skill
 │  ├─ Many short tasks? → Thread Pool
 │  └─ Launch external program? → CreateProcess
 ├─ Cross-process communication → ipc-and-networking.md
@@ -42,17 +44,18 @@ What are you building?
 │  ├─ Using COM objects? → COM / ComPtr
 │  ├─ Windows service? → Service Patterns
 │  └─ Registry / Shell / elevation? → Respective sections
-└─ Memory / error handling → memory-and-errors.md
-   ├─ HANDLE leak prevention? → HANDLE RAII
-   ├─ Crash dump? → SEH & MiniDump
-   └─ ANSI ↔ Unicode? → String Encoding
+├─ Memory / error handling → memory-and-errors.md
+│  ├─ HANDLE leak prevention? → HANDLE RAII
+│  ├─ Crash dump? → SEH & MiniDump
+│  └─ ANSI ↔ Unicode? → String Encoding
+└─ Console / debug / env vars → utilities.md
 ```
 
 ## Essential Patterns (Always Apply)
 
 ### HANDLE RAII — wrap every HANDLE
 
-See [references/memory-and-errors.md](references/memory-and-errors.md) § "HANDLE RAII Patterns" for full set of RAII wrappers (HANDLE, HMODULE, HKEY, GDI, HDC, ScopeGuard).
+See [references/memory-and-errors.md](references/memory-and-errors.md) § "HANDLE RAII Patterns" for specialized deleters (HMODULE, HKEY, GDI, HDC) and ScopeGuard.
 
 ```cpp
 // Core pattern used throughout all references
