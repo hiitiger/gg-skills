@@ -1,323 +1,34 @@
-# Window & GUI Patterns
+# Window & GUI — Decisions & Pitfalls
 
-## Table of Contents
-1. Window Class & Creation
-2. Per-Window State
-3. Message Loop Patterns
-4. Common Messages
-5. Window Subclassing
-6. GDI Drawing
-7. DPI Awareness
-8. Window Styles & Properties
+## Per-Window State
 
-## 1. Window Class & Creation
+WndProc is a free function with no `this`. Pass your state pointer through `CreateWindowExW`'s last param (`lpCreateParams`), store it in `GWLP_USERDATA` during `WM_CREATE`, retrieve with `GetWindowLongPtrW`. This avoids globals and supports multiple windows.
 
-```cpp
-LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp);
+## Message Loop — Which One?
 
-HWND create_main_window(HINSTANCE hInst, const wchar_t* title, int w, int h) {
-    WNDCLASSEXW wc = { sizeof(wc) };
-    wc.lpfnWndProc   = WndProc;
-    wc.hInstance      = hInst;
-    wc.hCursor        = LoadCursor(NULL, IDC_ARROW);
-    wc.hbrBackground  = (HBRUSH)(COLOR_WINDOW + 1);
-    wc.lpszClassName  = L"MyWindowClass";
-    wc.hIcon          = LoadIcon(NULL, IDI_APPLICATION);
-    RegisterClassExW(&wc);
+- **`GetMessage` loop** — blocks until message arrives, low CPU when idle. Use for standard desktop apps.
+- **`PeekMessage` loop** — runs continuously. Use for games/animations that render every frame.
+- **`MsgWaitForMultipleObjects` loop** — waits for messages OR kernel events. Use when mixing UI with worker threads or async I/O.
+- **With accelerator table** — wrap `TranslateAcceleratorW` before `TranslateMessage`/`DispatchMessage`.
 
-    // Adjust rect to account for title bar and borders
-    RECT rc = { 0, 0, w, h };
-    AdjustWindowRectEx(&rc, WS_OVERLAPPEDWINDOW, FALSE, 0);
+## Common Pitfalls
 
-    return CreateWindowExW(
-        0, wc.lpszClassName, title,
-        WS_OVERLAPPEDWINDOW,
-        CW_USEDEFAULT, CW_USEDEFAULT,
-        rc.right - rc.left, rc.bottom - rc.top,
-        NULL, NULL, hInst, nullptr);  // last param → WM_CREATE's CREATESTRUCT::lpCreateParams
-}
-```
+- **`SendMessage` from worker thread → deadlock.** It blocks until WndProc returns. If the UI thread is waiting on the worker, both stall. Always use `PostMessage` for cross-thread communication.
+- **Custom messages**: use `WM_APP + N` range, not `WM_USER + N` (which collides with control-specific messages).
+- **GDI double buffering**: must `SelectObject(memDC, oldBmp)` before `DeleteObject(memBmp)` — deleting a GDI object while selected into a DC leaks it.
+- **`BeginPaint`/`EndPaint`** must always be paired in `WM_PAINT`. Skipping `BeginPaint` causes infinite `WM_PAINT` messages.
 
-## 2. Per-Window State
+## DPI Awareness
 
-```cpp
-// Pass state pointer via CreateWindowEx lpParam
-HWND hwnd = CreateWindowExW(0, cls, title, style,
-    x, y, w, h, NULL, NULL, hInst, (LPVOID)my_app_state);
+Without DPI awareness, Windows bitmap-scales your app — blurry on high-DPI. Call `SetProcessDpiAwarenessContext(DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2)` before creating any window. Handle `WM_DPICHANGED` to resize using the suggested `RECT*` in lParam. Scale values with `MulDiv(logical, dpi, 96)`.
 
-// Retrieve in WndProc
-LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
-    AppState* app = (AppState*)GetWindowLongPtrW(hwnd, GWLP_USERDATA);
+## Window Subclassing
 
-    switch (msg) {
-    case WM_CREATE: {
-        auto* cs = (CREATESTRUCTW*)lp;
-        app = (AppState*)cs->lpCreateParams;
-        SetWindowLongPtrW(hwnd, GWLP_USERDATA, (LONG_PTR)app);
-        return 0;
-    }
-    case WM_PAINT:
-        app->on_paint(hwnd);
-        return 0;
-    case WM_DESTROY:
-        PostQuitMessage(0);
-        return 0;
-    }
-    return DefWindowProcW(hwnd, msg, wp, lp);
-}
-```
+Replaces a window's WndProc to intercept messages without owning the window class. Always call `CallWindowProcW` for unhandled messages. Remember to restore the original proc before destruction.
 
-## 3. Message Loop Patterns
+## Style Quick Reference
 
-### Standard loop (desktop apps)
-
-```cpp
-int run_message_loop() {
-    MSG msg;
-    while (GetMessageW(&msg, NULL, 0, 0) > 0) {
-        TranslateMessage(&msg);   // Generate WM_CHAR from WM_KEYDOWN
-        DispatchMessageW(&msg);
-    }
-    return (int)msg.wParam;
-}
-```
-
-### Real-time loop (games, animation)
-
-```cpp
-void run_realtime_loop() {
-    MSG msg;
-    bool running = true;
-    while (running) {
-        while (PeekMessageW(&msg, NULL, 0, 0, PM_REMOVE)) {
-            if (msg.message == WM_QUIT) { running = false; break; }
-            TranslateMessage(&msg);
-            DispatchMessageW(&msg);
-        }
-        if (running) {
-            update();
-            render();
-        }
-    }
-}
-```
-
-### Hybrid loop (messages + kernel objects)
-
-```cpp
-void run_hybrid_loop(HANDLE hStopEvent) {
-    MSG msg;
-    bool running = true;
-    while (running) {
-        DWORD result = MsgWaitForMultipleObjects(
-            1, &hStopEvent, FALSE, INFINITE, QS_ALLINPUT);
-
-        if (result == WAIT_OBJECT_0) {
-            running = false;
-        } else if (result == WAIT_OBJECT_0 + 1) {
-            while (PeekMessageW(&msg, NULL, 0, 0, PM_REMOVE)) {
-                if (msg.message == WM_QUIT) { running = false; break; }
-                TranslateMessage(&msg);
-                DispatchMessageW(&msg);
-            }
-        }
-    }
-}
-```
-
-### Accelerator table (keyboard shortcuts)
-
-```cpp
-HACCEL hAccel = LoadAcceleratorsW(hInst, MAKEINTRESOURCEW(IDR_ACCEL));
-MSG msg;
-while (GetMessageW(&msg, NULL, 0, 0) > 0) {
-    if (!TranslateAcceleratorW(hwnd, hAccel, &msg)) {
-        TranslateMessage(&msg);
-        DispatchMessageW(&msg);
-    }
-}
-```
-
-## 4. Common Messages
-
-| Message | When | Key Params |
-|---------|------|------------|
-| `WM_CREATE` | Window created | `lp` → `CREATESTRUCT*` |
-| `WM_DESTROY` | Window being destroyed | Call `PostQuitMessage(0)` |
-| `WM_CLOSE` | User clicked X | Call `DestroyWindow(hwnd)` or block |
-| `WM_PAINT` | Need to repaint | Use `BeginPaint`/`EndPaint` |
-| `WM_SIZE` | Window resized | `lp` = LOWORD(w) + HIWORD(h) |
-| `WM_COMMAND` | Menu/button/accelerator | LOWORD(wp) = ID |
-| `WM_KEYDOWN` | Key pressed | `wp` = virtual key code |
-| `WM_CHAR` | Character input | `wp` = Unicode char |
-| `WM_MOUSEMOVE` | Mouse moved | `lp` = LOWORD(x) + HIWORD(y) |
-| `WM_LBUTTONDOWN` | Left click | `lp` = position |
-| `WM_TIMER` | Timer tick | `wp` = timer ID |
-| `WM_DPICHANGED` | DPI changed (per-monitor) | `wp` = new DPI, `lp` → `RECT*` |
-
-### Custom messages
-
-```cpp
-constexpr UINT WM_APP_TASK_DONE = WM_APP + 1;
-
-// Post from worker thread (async, thread-safe)
-PostMessage(hwnd, WM_APP_TASK_DONE, status_code, (LPARAM)result_ptr);
-
-// Never use SendMessage from worker thread — deadlock risk
-```
-
-## 5. Window Subclassing
-
-```cpp
-WNDPROC g_original_proc = nullptr;
-
-LRESULT CALLBACK SubProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
-    if (msg == WM_KEYDOWN && wp == VK_ESCAPE) {
-        PostMessage(hwnd, WM_CLOSE, 0, 0);
-        return 0;
-    }
-    return CallWindowProcW(g_original_proc, hwnd, msg, wp, lp);
-}
-
-// Install
-g_original_proc = (WNDPROC)SetWindowLongPtrW(hwnd, GWLP_WNDPROC, (LONG_PTR)SubProc);
-
-// Restore
-SetWindowLongPtrW(hwnd, GWLP_WNDPROC, (LONG_PTR)g_original_proc);
-```
-
-## 6. GDI Drawing
-
-### WM_PAINT handler
-
-```cpp
-case WM_PAINT: {
-    PAINTSTRUCT ps;
-    HDC hdc = BeginPaint(hwnd, &ps);
-
-    // Draw text
-    SetTextColor(hdc, RGB(0, 0, 0));
-    SetBkMode(hdc, TRANSPARENT);
-    TextOutW(hdc, 10, 10, L"Hello", 5);
-
-    // Draw rectangle
-    RECT rc = { 50, 50, 200, 150 };
-    FillRect(hdc, &rc, (HBRUSH)(COLOR_HIGHLIGHT + 1));
-    FrameRect(hdc, &rc, (HBRUSH)GetStockObject(BLACK_BRUSH));
-
-    // Draw line
-    MoveToEx(hdc, 10, 200, NULL);
-    LineTo(hdc, 300, 200);
-
-    EndPaint(hwnd, &ps);
-    return 0;
-}
-```
-
-### Double buffering (flicker-free)
-
-```cpp
-case WM_PAINT: {
-    PAINTSTRUCT ps;
-    HDC hdc = BeginPaint(hwnd, &ps);
-
-    RECT rc;
-    GetClientRect(hwnd, &rc);
-    int w = rc.right, h = rc.bottom;
-
-    // Create off-screen buffer
-    HDC memDC = CreateCompatibleDC(hdc);
-    HBITMAP memBmp = CreateCompatibleBitmap(hdc, w, h);
-    HBITMAP oldBmp = (HBITMAP)SelectObject(memDC, memBmp);
-
-    // Draw to buffer
-    FillRect(memDC, &rc, (HBRUSH)(COLOR_WINDOW + 1));
-    draw_scene(memDC, w, h);
-
-    // Copy to screen
-    BitBlt(hdc, 0, 0, w, h, memDC, 0, 0, SRCCOPY);
-
-    // Cleanup
-    SelectObject(memDC, oldBmp);
-    DeleteObject(memBmp);
-    DeleteDC(memDC);
-    EndPaint(hwnd, &ps);
-    return 0;
-}
-```
-
-### Force repaint
-
-```cpp
-InvalidateRect(hwnd, NULL, TRUE);  // Entire client area, erase background
-InvalidateRect(hwnd, &dirty_rect, FALSE);  // Partial, no erase
-```
-
-## 7. DPI Awareness
-
-```cpp
-// Call before creating any window (Windows 10 1703+)
-SetProcessDpiAwarenessContext(DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2);
-
-// Scale values by DPI
-UINT dpi = GetDpiForWindow(hwnd);
-int scaled_px = MulDiv(logical_value, dpi, 96);
-
-// Handle WM_DPICHANGED
-case WM_DPICHANGED: {
-    UINT new_dpi = HIWORD(wp);
-    RECT* suggested = (RECT*)lp;
-    SetWindowPos(hwnd, NULL,
-        suggested->left, suggested->top,
-        suggested->right - suggested->left,
-        suggested->bottom - suggested->top,
-        SWP_NOZORDER | SWP_NOACTIVATE);
-    // Recalculate layout with new_dpi
-    return 0;
-}
-```
-
-## 8. Window Styles & Properties
-
-### Common style flags
-
-```
-WS_OVERLAPPEDWINDOW  — Standard app window (title + border + resize + sysmenu)
-WS_POPUP             — No title bar or border (splash screens, tooltips)
-WS_CHILD             — Child of another window (controls)
-WS_VISIBLE           — Initially visible
-
-WS_EX_TOPMOST        — Always on top
-WS_EX_LAYERED        — For alpha blending / transparency
-WS_EX_TRANSPARENT    — Click-through
-WS_EX_TOOLWINDOW     — Excluded from taskbar
-WS_EX_NOACTIVATE     — Doesn't steal focus
-```
-
-### Layered / transparent window
-
-```cpp
-SetWindowLongPtrW(hwnd, GWL_EXSTYLE,
-    GetWindowLongPtrW(hwnd, GWL_EXSTYLE) | WS_EX_LAYERED);
-SetLayeredWindowAttributes(hwnd, 0, 200, LWA_ALPHA);  // 200/255 opacity
-
-// Per-pixel alpha with UpdateLayeredWindow
-UpdateLayeredWindow(hwnd, NULL, &pos, &size, memDC, &srcPos,
-                    0, &blend, ULW_ALPHA);
-```
-
-### Timer
-
-```cpp
-SetTimer(hwnd, TIMER_ID_1, 16 /*ms*/, NULL);  // ~60 FPS
-
-case WM_TIMER:
-    if (wp == TIMER_ID_1) {
-        update_animation();
-        InvalidateRect(hwnd, NULL, FALSE);
-    }
-    return 0;
-
-// Cleanup
-KillTimer(hwnd, TIMER_ID_1);
-```
+- `WS_EX_LAYERED` — for alpha/transparency (`SetLayeredWindowAttributes`)
+- `WS_EX_TOPMOST` — always on top
+- `WS_EX_NOACTIVATE` — doesn't steal focus
+- `WS_EX_TOOLWINDOW` — excluded from taskbar

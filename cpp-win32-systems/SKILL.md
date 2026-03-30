@@ -1,94 +1,54 @@
 ---
 name: cpp-win32-systems
-description: Windows C++ systems programming with Win32 API. Use when writing C++ code for Windows desktop applications, GUI windows, message loops, threads, processes, DLL development, COM interfaces, services, shared memory, named pipes, Winsock networking, async I/O (IOCP), registry, file I/O, GDI drawing, crash dump analysis, SEH (structured exception handling), debugging Windows-specific issues, or any Win32 API usage. Triggers on HWND, HANDLE, HINSTANCE, CreateWindow, GetMessage, DispatchMessage, CreateThread, CreateProcess, LoadLibrary, CreateFileMapping, CreateNamedPipe, WSAStartup, CreateIoCompletionPort, SetWindowLongPtr, RegisterClassEx, WndProc, LRESULT CALLBACK, WM_ messages, HRESULT, ComPtr, DllMain, VirtualAlloc, BeginPaint, MiniDumpWriteDump, SetUnhandledExceptionFilter, __try/__except, or any Windows-specific C++ code.
+description: Windows C++ systems programming with Win32 API. Use when the task is primarily about Win32 API calls — GUI windows, message loops, GDI, DLL/COM, services, registry, named pipes, shared memory, Winsock, IOCP, SEH, API hooking, or code using HWND/HANDLE/HRESULT/ComPtr/WndProc/WM_ messages.
 ---
 
 # Windows C++ Systems Programming
 
-## Categories
+## How to Use
+
+1. Use the decision tree to pick **one** reference — read only that file.
+2. If the task spans two domains (e.g., IOCP + DLL), read the second reference on demand.
+3. If the task is primarily about std concurrency, modern C++, or .dmp analysis, hand off to the corresponding skill instead.
+
+## References
 
 | Category | When to Use | Reference |
 |----------|------------|-----------|
-| **Window & GUI** | Creating windows, handling messages, drawing, DPI | [gui-and-windows.md](references/gui-and-windows.md) |
+| **Window & GUI** | Windows, messages, GDI, DPI | [gui-and-windows.md](references/gui-and-windows.md) |
 | **Thread & Process** | Threads, thread pools, sync, child processes | [threads-and-processes.md](references/threads-and-processes.md) |
 | **IPC & Networking** | Shared memory, pipes, sockets, cross-process sync | [ipc-and-networking.md](references/ipc-and-networking.md) |
-| **I/O & File System** | File read/write, memory mapping, async I/O, IOCP | [io-and-filesystem.md](references/io-and-filesystem.md) |
+| **I/O & File System** | File I/O, memory mapping, async I/O, IOCP | [io-and-filesystem.md](references/io-and-filesystem.md) |
 | **System Services** | DLL, COM, services, registry, Shell, UAC | [system-and-services.md](references/system-and-services.md) |
 | **Memory & Errors** | HANDLE RAII, virtual memory, SEH, encoding, errors | [memory-and-errors.md](references/memory-and-errors.md) |
-| **Utilities** | Console, debug output, perf timing, env vars | [utilities.md](references/utilities.md) |
+| **Utilities** | Console, debug output, env vars | [utilities.md](references/utilities.md) |
+| **Hooks & Inspection** | Module enumeration, Detours, VTable, message hooks | [hooks-and-inspection.md](references/hooks-and-inspection.md) |
 
-## Quick Decision Tree
+## Decision Tree
 
 ```
-What are you building?
 ├─ Desktop app with window → gui-and-windows.md
-│  ├─ Need custom drawing/paint? → GDI section
-│  └─ High-DPI support? → DPI section
 ├─ Background work / parallelism → threads-and-processes.md
-│  ├─ Win32 thread (CreateThread / _beginthreadex)? → Creating Threads
-│  ├─ std::thread / std::mutex / C++ sync? → cpp-concurrency skill
-│  ├─ Many short tasks? → Thread Pool
-│  └─ Launch external program? → CreateProcess
+│  └─ std::thread / std::mutex / C++ sync? → cpp-concurrency skill
 ├─ Cross-process communication → ipc-and-networking.md
-│  ├─ Shared data buffer? → Shared Memory
-│  ├─ Stream / request-response? → Named Pipes
-│  ├─ Network communication? → Winsock
-│  └─ Signal / coordinate? → Named Events / Mutexes
 ├─ File / disk / async I/O → io-and-filesystem.md
-│  ├─ Read/write files? → CreateFile
-│  ├─ Map file to memory? → Memory-Mapped Files
-│  ├─ High-perf async? → IOCP
-│  └─ Watch for changes? → ReadDirectoryChanges
 ├─ DLL / COM / system integration → system-and-services.md
-│  ├─ Building a DLL? → DLL Patterns
-│  ├─ Using COM objects? → COM / ComPtr
-│  ├─ Windows service? → Service Patterns
-│  └─ Registry / Shell / elevation? → Respective sections
-├─ Memory / error handling → memory-and-errors.md
-│  ├─ HANDLE leak prevention? → HANDLE RAII
-│  ├─ Crash dump? → SEH & MiniDump
-│  └─ ANSI ↔ Unicode? → String Encoding
-└─ Console / debug / env vars → utilities.md
+├─ Hooking / inspection → hooks-and-inspection.md
+├─ Debugging / crash analysis → memory-and-errors.md § SEH
+│  └─ Crash dump (.dmp) file? → windbg-crash skill
+├─ Console / debug / env vars → utilities.md
+└─ RAII, smart pointers, modern C++ → cpp-modern-dev skill
 ```
 
-## Essential Patterns (Always Apply)
+## Core Rules
 
-### HANDLE RAII — wrap every HANDLE
+1. **HANDLE RAII** — wrap every Win32 resource in a RAII type. Use `UniqueHandle` for HANDLE (see [memory-and-errors.md](references/memory-and-errors.md) for the deleter and specialized variants). General RAII concepts → `cpp-modern-dev` skill.
 
-See [references/memory-and-errors.md](references/memory-and-errors.md) § "HANDLE RAII Patterns" for specialized deleters (HMODULE, HKEY, GDI, HDC) and ScopeGuard.
+2. **Always W-suffix APIs** — `CreateFileW`, not `CreateFileA`. Never use `TCHAR`/`_T()` in new code.
 
-```cpp
-// Core pattern used throughout all references
-struct HandleDeleter {
-    using pointer = HANDLE;
-    void operator()(HANDLE h) const {
-        if (h && h != INVALID_HANDLE_VALUE) CloseHandle(h);
-    }
-};
-using UniqueHandle = std::unique_ptr<void, HandleDeleter>;
-```
+3. **Error checking** — every Win32 call can fail. Three models:
+   - `BOOL` + `GetLastError()` — most Win32. Capture immediately, it's overwritten by the next call.
+   - `HRESULT` — COM/DirectX. Use `FAILED(hr)`, don't compare to `S_OK` (some success codes are nonzero).
+   - `__try/__except` — hardware exceptions only. Not for flow control. Cannot mix with C++ exceptions in the same function.
 
-### Error checking — every Win32 call can fail
-
-```cpp
-// For BOOL-returning functions
-if (!CreateProcessW(...)) {
-    DWORD err = GetLastError();
-    // handle error
-}
-
-// For HRESULT-returning functions (COM/DirectX)
-HRESULT hr = device->CreateBuffer(&desc, &data, &buf);
-if (FAILED(hr)) { /* handle */ }
-```
-
-### Unicode — always use W-suffix APIs
-
-```cpp
-// YES: Wide char APIs
-CreateFileW(L"path.txt", ...);
-MessageBoxW(hwnd, L"text", L"caption", MB_OK);
-
-// NO: Don't use A-suffix (ANSI) APIs in new code
-// CreateFileA("path.txt", ...);
-```
+4. **Win32 vs Standard C++** — prefer `std::thread`/`std::mutex`/`std::fstream` for portable code. Use Win32 when you need: IOCP, named kernel objects, security descriptors, window messages, COM, registry, or `WaitForMultipleObjects`.
