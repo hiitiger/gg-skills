@@ -29,7 +29,7 @@ clang++ -fsanitize=thread -g -O1 main.cpp -o main && ./main
 
 **Trace:** Find every site that holds 2+ locks simultaneously. Are they always acquired in the same order?
 
-| Red Flag | Fix (see synchronization.md §4) |
+| Red Flag | Fix (see synchronization.md §3) |
 |----------|-----|
 | Two functions lock A,B and B,A respectively | `std::scoped_lock(A, B)` or documented ordering |
 | Lock held during callback / virtual call | Copy data out, release lock, then call |

@@ -4,6 +4,7 @@
 1. Cancellation — Tricky Cases
 2. UI Thread / Worker Thread Boundary
 3. Callback Lifetime Across Threads
+4. Singleton / One-Time Initialization
 
 ---
 
@@ -76,14 +77,21 @@ void worker(std::stop_token stoken, HANDLE file) {
 
 ```cpp
 // Windows — PostMessage
-void background_work(HWND hwnd) {
-    std::jthread t([hwnd] {
-        auto result = expensive_computation();
-        PostMessage(hwnd, WM_APP_RESULT, 0, reinterpret_cast<LPARAM>(
-            new Result(std::move(result))
-        ));
-    });
-}
+class BackgroundTask {
+    std::jthread thread_;
+
+public:
+    void start(HWND hwnd) {
+        thread_ = std::jthread([hwnd](std::stop_token stoken) {
+            auto result = expensive_computation();
+            if (!stoken.stop_requested()) {
+                PostMessage(hwnd, WM_APP_RESULT, 0, reinterpret_cast<LPARAM>(
+                    new Result(std::move(result))
+                ));
+            }
+        });
+    }
+};
 
 case WM_APP_RESULT: {
     auto* result = reinterpret_cast<Result*>(lParam);
@@ -97,17 +105,27 @@ case WM_APP_RESULT: {
 
 ```cpp
 class UiDispatcher {
-    BlockingQueue<std::function<void()>> queue_;
+    std::mutex mtx_;
+    std::queue<std::function<void()>> queue_;
 
 public:
     void post(std::function<void()> fn) {
-        queue_.push(std::move(fn));
+        {
+            std::lock_guard lock(mtx_);
+            queue_.push(std::move(fn));
+        }
         // Wake UI thread (PostMessage, CFRunLoopSourceSignal, etc.)
     }
 
     void drain() {  // Called from UI thread's message loop
-        while (auto fn = queue_.pop_nowait()) {
-            (*fn)();
+        std::queue<std::function<void()>> pending;
+        {
+            std::lock_guard lock(mtx_);
+            std::swap(pending, queue_);
+        }
+        while (!pending.empty()) {
+            pending.front()();
+            pending.pop();
         }
     }
 };
@@ -156,27 +174,32 @@ void on_button_click() {
 ```cpp
 class Processor : public std::enable_shared_from_this<Processor> {
     std::vector<int> data_;
+    Executor& exec_;
 
 public:
-    void start() {
-        auto self = shared_from_this();
-        std::jthread t([self] {
+    explicit Processor(Executor& exec) : exec_(exec) {}
+
+    void schedule() {
+        exec_.submit([self = shared_from_this()] {
             self->process(self->data_);  // Safe: shared_ptr keeps alive
         });
     }
 };
-// MUST be created as: auto p = std::make_shared<Processor>();
+// MUST be created as: auto p = std::make_shared<Processor>(executor);
 ```
 
 ### Solution 2: weak_ptr for periodic work
 
 ```cpp
 class Processor : public std::enable_shared_from_this<Processor> {
+    std::jthread thread_;
+
 public:
     void start_periodic() {
         std::weak_ptr<Processor> weak = weak_from_this();
-        std::jthread t([weak] {
+        thread_ = std::jthread([weak](std::stop_token stoken) {
             while (auto self = weak.lock()) {
+                if (stoken.stop_requested()) return;
                 self->do_work();
                 std::this_thread::sleep_for(1s);
             }
@@ -205,3 +228,15 @@ class Processor {
     }
 };
 ```
+
+---
+
+## 4. Singleton / One-Time Initialization
+
+Prefer function-local static or `std::call_once` for one-time initialization. The point here is not the syntax; it is to avoid inventing custom publication logic.
+
+### Red flags
+
+- Double-checked locking without a proven atomic publication pattern
+- Global raw pointer + manual lazy init + no synchronization
+- Singleton owning worker threads but exposing no shutdown path for tests/process exit

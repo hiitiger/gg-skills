@@ -1,21 +1,30 @@
 # Threads & Async
 
 ## Table of Contents
-1. std::thread Pitfalls
-2. std::jthread — Stop Token Patterns
+1. std::thread Pitfalls (pre-C++20)
+2. jthread — Stop Token Patterns
 3. std::async — Known Limitations
-4. Future Patterns (shared_future, packaged_task)
+4. Future Patterns
 5. Thread Lifetime Management
 6. Passing Data to Threads
 
 ---
 
-## 1. std::thread Pitfalls
+Use this file for ownership, cancellation, `async` pitfalls, and result handoff. It is intentionally biased toward defaults that prevent lifetime bugs rather than teaching the threading library from scratch.
+
+---
+
+## 1. std::thread Pitfalls (pre-C++20)
 
 - Destructor of joinable `std::thread` calls `std::terminate()` — always join or detach
 - Arguments are **copied** into the thread — use `std::ref()` for references (but be careful about lifetime)
 - `detach()` is almost always wrong — the thread must NOT access any stack/local data after detach
-- **Prefer `std::jthread`** (C++20) to avoid the join/detach burden
+
+| Feature | `std::thread` | `std::jthread` |
+|---------|:---:|:---:|
+| Auto-join on destruction | No (terminates) | Yes |
+| Cooperative cancellation | Manual | `stop_token` built-in |
+| Recommendation | Pre-C++20 only | **Default choice** |
 
 ---
 
@@ -33,15 +42,6 @@ void worker(std::stop_token stoken) {
     }
 }
 ```
-
-### jthread vs thread
-
-| Feature | `std::thread` | `std::jthread` |
-|---------|:---:|:---:|
-| Auto-join on destruction | ❌ (terminates!) | ✅ |
-| Cooperative cancellation | Manual | `stop_token` built-in |
-| C++ standard | C++11 | C++20 |
-| Recommendation | Legacy code only | **Default choice** |
 
 ---
 
@@ -68,6 +68,8 @@ for (int i = 0; i < 10000; ++i)
 ---
 
 ## 4. Future Patterns
+
+Use futures for result handoff, not for long-lived worker ownership.
 
 ### std::shared_future — multiple consumers wait on one result
 
@@ -143,11 +145,11 @@ void good() {
 
 ## 6. Passing Data to Threads
 
-| Method | When | Example |
-|--------|------|---------|
-| Copy into lambda | Small data, independent | `[data]() { ... }` |
-| Move into lambda | Large data, transfer ownership | `[d = std::move(data)]() { ... }` |
-| `std::ref` | Thread needs to write back to caller | `std::thread(fn, std::ref(out))` |
-| shared_ptr | Data shared across multiple threads | `[sp = shared]() { sp->read(); }` |
-| Channel (future/promise) | One-shot result delivery | See §4 |
-| Queue | Continuous data stream | See patterns-and-architecture.md |
+| Method | When | Example | Guidance |
+|--------|------|---------|----------|
+| Copy into lambda | Small data, independent | `[data]() { ... }` | Safe default |
+| Move into lambda | Large data, ownership transfer | `[d = std::move(data)]() { ... }` | Prefer over sharing |
+| `std::ref` | Worker writes back to caller | `std::thread(fn, std::ref(out))` | Only when lifetime is explicit |
+| `shared_ptr` | Genuinely shared across threads | `[sp = shared]() { sp->read(); }` | Not just to silence lifetime uncertainty |
+| Future/promise | One-shot result delivery | See §4 | Prefer over ad hoc shared state |
+| Queue | Continuous stream | See patterns-and-architecture.md | Prefer over shared-state polling |

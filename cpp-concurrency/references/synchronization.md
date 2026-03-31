@@ -7,7 +7,8 @@
 4. Atomic vs Lock Decision Guide
 5. Atomic Patterns
 6. Sharded Locking (Bucket-Level)
-7. shared_mutex — When (and When Not)
+7. Semaphore, Latch & Barrier (C++20)
+8. shared_mutex — When (and When Not)
 
 ---
 
@@ -18,7 +19,7 @@
 | `std::mutex` | Default for exclusive access |
 | `std::timed_mutex` | Need `try_lock_for` timeout |
 | `std::recursive_mutex` | Same thread re-enters lock (**avoid — redesign instead**) |
-| `std::shared_mutex` | Multiple readers, single writer (see §6 for criteria) |
+| `std::shared_mutex` | Multiple readers, single writer (see §8 for criteria) |
 
 | Guard | Use When |
 |-------|----------|
@@ -219,7 +220,22 @@ Consider `alignas(64)` on each bucket to prevent false sharing between adjacent 
 
 ---
 
-## 7. shared_mutex — When (and When Not)
+## 7. Coordination Primitives Selection (C++20)
+
+| Scenario | Use | Why not the others |
+|----------|-----|--------------------|
+| Wait until notified, then check a predicate | `condition_variable` | cv carries no state — you own the predicate and the mutex |
+| Limit N concurrent accessors (pool, rate limit) | `counting_semaphore` | The count IS the state — no external mutex/predicate needed |
+| Simple one-shot or ping-pong signal | `binary_semaphore` | Lighter than cv+mutex; and unlike cv, **signals are not lost** — release() before acquire() still works |
+| Wait for a complex condition on shared state | `condition_variable` | Semaphore can't express arbitrary predicates |
+| N threads finish init, then all proceed | `latch` | Single-use countdown — simpler than barrier for one-shot sync |
+| Iterative parallel phases (sim steps, pipeline) | `barrier` | Reusable + per-phase completion callback |
+
+**The #1 mistake:** using `condition_variable` for simple signaling where `binary_semaphore` is correct. A cv `notify_one()` before the other thread calls `wait()` is **lost**. A semaphore `release()` before `acquire()` is **remembered**. If your signal can arrive before the waiter is ready, semaphore is safer.
+
+---
+
+## 8. shared_mutex — When (and When Not)
 
 `shared_mutex` is **heavier** than `mutex`. Only use when:
 - Reads vastly outnumber writes (>10:1 ratio)

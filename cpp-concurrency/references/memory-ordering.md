@@ -141,3 +141,16 @@ Weak memory model — all reorderings are possible. This is where incorrect orde
 ### MSVC Volatile
 
 MSVC with `/volatile:ms` (default) makes `volatile` loads acquire and `volatile` stores release. This is non-standard — use `std::atomic` instead.
+
+---
+
+## When to Read Another Reference
+
+This file covers memory ordering choices for common application-level lock-free patterns. If the task involves:
+
+- `atomic::wait` / `notify_one` / `notify_all`
+- ABA hazards in CAS-based structures
+- Hazard pointers, epoch reclamation, or safe node reclamation
+- MPMC queue correctness and shutdown boundaries
+
+read [advanced-lock-free.md](advanced-lock-free.md) instead of extending these examples ad hoc.

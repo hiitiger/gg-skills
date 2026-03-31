@@ -7,9 +7,9 @@ description: Decisions, pitfalls, and patterns for multi-threaded C++ — thread
 
 ## How to Use
 
-1. Use the decision tree to pick **one** reference — read only that file.
+1. Use the reference table to pick **one** reference — read only that file.
 2. If the task spans two areas (e.g., synchronization + architecture), read the second on demand.
-3. **Writing** concurrent code: default to jthread + scoped_lock; verify every shared mutable variable has synchronization and every long-running thread has a shutdown path.
+3. **Writing** concurrent code: this skill is **C++20-first** — default to `jthread` + `scoped_lock`. If the codebase is C++17 or earlier, keep the same lifecycle and synchronization rules but swap in `std::thread` + explicit join ownership, atomic/cv stop flags, and pre-C++20 primitives.
 4. **Reviewing** concurrent code: trace each shared mutable variable — who reads, who writes, what synchronizes them. Use [review-checklist.md](references/review-checklist.md) as a systematic pass.
 5. **Debugging** a race or deadlock: reproduce → isolate the shared state → apply tooling (TSan, Concurrency Visualizer) → verify fix under stress.
 6. **Non-std threading** (Boost.Asio, Qt threads, Win32 thread pool, etc.): the core rules and review checklist still apply — map them to the framework's primitives rather than copying std:: code verbatim.
@@ -23,15 +23,21 @@ description: Decisions, pitfalls, and patterns for multi-threaded C++ — thread
 | **Patterns & Architecture** | Producer-consumer queue, thread pool, active object | [patterns-and-architecture.md](references/patterns-and-architecture.md) |
 | **Thread Safety Patterns** | Cancellation, UI/worker boundary, callback lifetime, singleton | [thread-safety-patterns.md](references/thread-safety-patterns.md) |
 | **Memory Ordering** | acquire/release, lock-free structures, relaxed vs seq_cst | [memory-ordering.md](references/memory-ordering.md) |
+| **Advanced Lock-Free** | atomic wait/notify, ABA, reclamation strategies, MPMC queue boundaries | [advanced-lock-free.md](references/advanced-lock-free.md) |
+| **Testing & Debugging** | Stress harnesses, sanitizer strategy, hang triage, concurrency logging | [testing-and-debugging.md](references/testing-and-debugging.md) |
 | **Review Checklist** | Systematic check for data race, deadlock, dangling capture, missing cancel | [review-checklist.md](references/review-checklist.md) |
 
 ## Core Rules
 
-1. **Every `std::thread` must be joined or detached** — an unjoinable thread's destructor calls `std::terminate()`. Prefer `std::jthread` which auto-joins.
-2. **Never access shared data without synchronization** — without a mutex, atomic, or immutability guarantee, the compiler and CPU may reorder or tear reads/writes across threads.
-3. **Lock ordering must be consistent** — if thread A locks X then Y, and thread B locks Y then X, you deadlock. Use `scoped_lock(X, Y)` or enforce a documented global order.
-4. **Prefer `scoped_lock` over manual lock/unlock** — manual lock/unlock leaks on exceptions and early returns. RAII locks make "forget to unlock" impossible.
-5. **`std::atomic` ≠ thread-safe class** — people see "atomic" and assume the whole object is safe, but atomics only protect a single value. Two atomic fields can be individually consistent yet mutually contradictory — use a mutex when an invariant spans multiple fields.
-6. **Callbacks captured by reference + async = dangling** — the lambda outlives the captured object. Capture by value or use `shared_ptr` / `shared_from_this`.
-7. **Every long-running thread needs a stop mechanism** — without one, the thread blocks shutdown and leaks resources. Use `stop_token`, an atomic flag, or a closeable queue.
+1. **Every `std::thread` must be joined or detached** — unjoinable destructor calls `std::terminate()`. Prefer `std::jthread` (auto-joins).
+2. **No shared mutable access without synchronization** — without a mutex, atomic, or immutability guarantee, reads/writes across threads are a data race.
+3. **Lock ordering must be consistent** — use `scoped_lock(X, Y)` or enforce a documented global order. Never hold a lock while calling unknown code (callbacks, virtual calls).
+4. **`std::atomic` ≠ thread-safe class** — atomics protect a single value. Two atomic fields can be individually consistent yet mutually contradictory — use a mutex when an invariant spans multiple fields.
+5. **Callbacks captured by reference + async = dangling** — the lambda outlives the captured object. Capture by value or use `shared_ptr` / `shared_from_this`.
+6. **Every long-running thread needs a stop mechanism** — use `stop_token`, an atomic flag, or a closeable queue.
+
+## Working Defaults
+
+- For review, trace shared mutable state and thread lifetime before discussing performance.
+- Escalate to the advanced references only when the code is already lock-free or profiling proves simpler synchronization is insufficient.
 
