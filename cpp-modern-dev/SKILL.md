@@ -10,31 +10,19 @@ description: Modern C++ design and implementation guidance for C++17/20/23. Use 
 1. Use the decision tree to pick **one** reference -- read only that file.
 2. If the task spans two areas (e.g., RAII + templates), read the second on demand.
 
-## Decision Tree
+## References
 
-```
-What are you doing?
-|- New project / build setup -> references/build-and-tooling.md
-|  \- Sanitizers, packages, modules, cross-compile -> references/build-advanced.md
-|- Managing a resource (memory, handle, file, socket)
-|  |- Which smart pointer? -> references/raii-and-resources.md
-|  |- Custom RAII wrapper? -> references/raii-and-resources.md
-|  \- Ownership analysis? -> references/raii-and-resources.md
-|- Multi-threading / concurrency -> see cpp-concurrency skill
-|- Designing a class
-|  |- Owns a resource? -> Rule of Five (references/core-language.md)
-|  |- No resources? -> Rule of Zero (references/core-language.md)
-|  |- Need comparison ops? (C++20) -> Spaceship (references/core-language.md)
-|  \- Compile-time polymorphism? -> CRTP / Concepts (references/templates-and-generics.md)
-|- Choosing a container -> references/stl-and-algorithms.md
-|- Processing collections (C++20) -> references/stl-and-algorithms.md
-|- Writing generic code
-|  |- C++20+ -> Concepts (references/templates-and-generics.md)
-|  \- C++17 -> SFINAE / if constexpr (references/templates-and-generics.md)
-|- Handling "might not have a value" -> references/type-safety.md
-|- Error strategy -> references/error-handling.md
-\- Performance optimization -> references/performance-patterns.md
-```
+| Category | When to Use | Reference |
+|----------|------------|-----------|
+| **Build & Tooling** | New project, CMake setup, compiler flags | [build-and-tooling.md](references/build-and-tooling.md) |
+| **Build Advanced** | Sanitizers, packages, modules, cross-compile | [build-advanced.md](references/build-advanced.md) |
+| **RAII & Resources** | Smart pointers, custom RAII wrappers, ownership analysis | [raii-and-resources.md](references/raii-and-resources.md) |
+| **Core Language** | Class design, Rule of Zero/Five, spaceship operator, move semantics | [core-language.md](references/core-language.md) |
+| **Templates & Generics** | Concepts (C++20), SFINAE, if constexpr, CRTP | [templates-and-generics.md](references/templates-and-generics.md) |
+| **STL & Algorithms** | Container choice, ranges (C++20), standard algorithms | [stl-and-algorithms.md](references/stl-and-algorithms.md) |
+| **Type Safety** | optional, variant, expected, span, narrowing | [type-safety.md](references/type-safety.md) |
+| **Error Handling** | Exceptions vs error codes, expected (C++23), strategy choice | [error-handling.md](references/error-handling.md) |
+| **Performance Patterns** | Move semantics, allocation, cache, profiling | [performance-patterns.md](references/performance-patterns.md) |
 
 ## Core Rules
 
